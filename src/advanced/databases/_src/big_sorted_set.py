@@ -434,9 +434,11 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                 db.clear()
 
     def update(self: Self, /, *iterables: Iterable[Any]) -> None:
-        iterator = chain.from_iterable(iterables)
         if self._len == 0:
             filenames = self._filenames
+            iterables = (*map(iter, iterables),)
+            # Optimized for not `if not in self:` checks when initially empty.
+            iterator = chain.from_iterable(iterables)
             front = (key for key, _ in groupby(sorted(islice(iterator, CHUNKSIZE_EXTENDED ** 2))))
             while True:
                 chunk = [*islice(front, CHUNKSIZE_EXTENDED)]
@@ -447,5 +449,22 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                 self._len += len(chunk)
                 self._lens.append(len(chunk))
                 self._mins.append(chunk[0])
-        for element in iterator:
-            self.add(element)
+        # Chain iterables and collect only new items.
+        iterator = (
+            element
+            for iterable in iterables
+            for element in iterable
+            if element not in self
+        )
+        while True:
+            has_elements = False
+            # Fast cache-efficient insertion by sorting in chunks and
+            # inserting nearby elements together.
+            for key, _ in groupby(sorted(islice(
+                iterator,
+                CHUNKSIZE_EXTENDED ** 2,
+            ))):
+                has_elements = True
+                self.add(element)
+            if not has_elements:
+                return
