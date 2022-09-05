@@ -277,7 +277,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
         del self._mins[index]
 
     def _free_cache(self: Self, /) -> None:
-        while len(self._cache) >= 4:
+        while len(self._cache) >= 16:
             self._commit_chunk(*self._cache.popitem(last=False))
 
     def _get_filename(self: Self, /) -> int:
