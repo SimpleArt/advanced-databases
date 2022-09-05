@@ -133,7 +133,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
             self._filenames.append(self._get_filename())
             self._cache[self._filenames[-1]] = chunk[len(chunk) // 2:]
             lens[0] = len(chunk) // 2
-            del len[chunk // 2 :]
+            del chunk[len(chunk) // 2 :]
             lens.append(len(chunk))
             mins.append(chunk[0])
         else:
@@ -192,11 +192,13 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                 lens[-2] = len(self._cache_chunk(-2))
                 self._cache_chunk(-1)[:] = chunk[len(chunk) // 3 : 2 * len(chunk) // 3]
                 lens[-1] = len(self._cache_chunk(-1))
+                mins[-1] = self._cache_chunk(-1)[0]
                 del chunk[: 2 * len(chunk) // 3]
                 self._filenames.append(self._get_filename())
                 self._free_cache()
                 self._cache[self._filenames[-1]] = chunk
                 lens.append(len(chunk))
+                mins.append(chunk[0])
             elif (
                 CHUNKSIZE // 2 < lens[-1] < CHUNKSIZE * 2
                 and CHUNKSIZE_EXTENDED < lens[-1] + lens[-2] < 3 * CHUNKSIZE
@@ -206,6 +208,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                 diff = lens[-2] - lens[-1]
                 self._cache_chunk(-1)[:0] = self._cache_chunk(-2)[-diff // 2 :]
                 lens[-1] = len(self._cache_chunk(-1))
+                mins[-1] = self._cache_chunk(-1)[0]
                 del self._cache_chunk(-2)[-diff // 2 :]
                 lens[-2] = len(self._cache_chunk(-2))
             else:
@@ -214,6 +217,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                 lens[-2] = len(self._cache_chunk(-2))
                 del self._cache_chunk(-1)[: diff // 2]
                 lens[-1] = len(self._cache_chunk(-1))
+                mins[-1] = self._cache_chunk(-1)[0]
         else:
             if lens[index - 1] + lens[index] + lens[index + 1] < CHUNKSIZE_EXTENDED:
                 chunk = [
@@ -225,6 +229,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                 self._cache_chunk(index)[:] = chunk[len(chunk) // 2 :]
                 lens[index - 1] = len(chunk) // 2
                 lens[index] = (len(chunk) + 1) // 2
+                mins[index] = self._cache_chunk(index)[0]
             elif lens[index - 1] + lens[index] + lens[index + 1] > 6 * CHUNKSIZE:
                 chunk = [
                     *self._cache_chunk(index - 1),
@@ -235,13 +240,16 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                 lens[index - 1] = len(self._cache_chunk(index - 1))
                 self._cache_chunk(index)[:] = chunk[len(chunk) // 4 : len(chunk) // 2]
                 lens[index] = len(self._cache_chunk(index))
+                mins[index] = self._cache_chunk(index)[0]
                 self._cache_chunk(index + 1)[:] = chunk[len(chunk) // 2 : 3 * len(chunk) // 4]
                 lens[index + 1] = len(self._cache_chunk(index + 1))
+                mins[index + 1] = self._cache_chunk(index + 1)[0]
                 del chunk[: 3 * len(chunk) // 4]
                 self._filenames.insert(index + 2, self._get_filename())
                 self._free_cache()
                 self._cache[self._filenames[index + 2]] = chunk
                 lens.insert(index + 2, len(chunk))
+                mins.insert(index + 2, chunk[0])
             elif not all(CHUNKSIZE // 2 < 2 * L // 3 < CHUNKSIZE for L in lens[index - 1 : index + 2]):
                 chunk = [
                     *self._cache_chunk(index - 1),
@@ -252,8 +260,10 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                 lens[index - 1] = len(self._cache_chunk(index - 1))
                 self._cache_chunk(index)[:] = chunk[len(chunk) // 3 : 2 * len(chunk) // 3]
                 lens[index] = len(self._cache_chunk(index))
+                mins[index] = self._cache_chunk(index)[0]
                 self._cache_chunk(index + 1)[:] = chunk[2 * len(chunk) // 3 :]
                 lens[index + 1] = len(self._cache_chunk(index + 1))
+                mins[index + 1] = self._cache_chunk(index + 1)[0]
 
     def _cache_chunk(self: Self, index: int, /) -> list[T]:
         filename = self._filenames[index]
@@ -319,6 +329,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
             self._cache[self._filenames[-1]] = [element]
             self._len = 1
             self._lens.append(1)
+            self._mins.append(element)
 
     def clear(self: Self, /) -> None:
         path = self._path
