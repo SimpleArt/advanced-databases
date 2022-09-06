@@ -418,7 +418,13 @@ class BigSortedSet(MutableSet[T], Generic[T]):
         return result
 
     def issuperset(self: Self, iterable: Iterable[Any], /) -> bool:
-        return all(element in self for element in iterable)
+        iterator = iter(iterable)
+        while True:
+            chunk = sorted(islice(iterable, CHUNKSIZE_EXTENDED))
+            if not chunk:
+                return True
+            elif not all(element in self for element in chunk):
+                return False
 
     def pop(self: Self, /) -> T:
         if self._len == 0:
