@@ -1,4 +1,4 @@
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 from ._src.big_list import BigList
 from ._src.big_sorted_set import BigSortedSet

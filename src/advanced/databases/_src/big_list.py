@@ -471,6 +471,12 @@ class BigList(ViewableMutableSequence[T], Generic[T]):
         while len(self._cache) >= 4:
             self._commit_chunk(*self._cache.popitem(last=False))
 
+    def _from_iterable(cls: Type[Self], iterable: Iterable[T], /) -> Self:
+        raise NotImplementedError(
+            "cannot create big instances, create a destination to save"
+            " into instead."
+        )
+
     def _get_filename(self: Self, /) -> int:
         path = self._path
         with open(path / "list" / "counter.txt", mode="rb") as file:
