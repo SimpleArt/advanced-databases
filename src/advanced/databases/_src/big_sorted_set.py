@@ -396,9 +396,15 @@ class BigSortedSet(MutableSet[T], Generic[T]):
 
     def isdisjoint(self: Self, iterable: Iterable[Any], /) -> bool:
         if length_hint(iterable) > len(self) and isinstance(iterable, AbstractSet):
-            return any(element in iterable for element in self)
+            return not any(element in iterable for element in self)
         else:
-            return any(element in self for element in iterable)
+            iterator = iter(iterable)
+            while True:
+                chunk = sorted(islice(iterator, CHUNKSIZE_EXTENDED))
+                if not chunk:
+                    return True
+                elif any(element in self for element in chunk):
+                    return False
 
     def issubset(self: Self, iterable: Iterable[Any], /) -> bool:
         if isinstance(iterable, AbstractSet):
