@@ -93,6 +93,19 @@ class BigSortedSet(MutableSet[T], Generic[T]):
     def __enter__(self: Self, /) -> Self:
         return self
 
+    def __eq__(self: Self, other: Any, /) -> bool:
+        if other is self:
+            return True
+        elif isinstance(other, BigSortedSet):
+            return (
+                len(self) == len(other)
+                and all(x == y for x, y in zip(self, other))
+            )
+        elif isinstance(other, AbstractSet):
+            return len(self) == len(other) and other.issuperset(self)
+        else:
+            return NotImplemented
+
     def __exit__(
         self: Self,
         exc_type: Optional[Type[ET]],
@@ -141,6 +154,19 @@ class BigSortedSet(MutableSet[T], Generic[T]):
 
     def __len__(self: Self, /) -> int:
         return self._len
+
+    def __ne__(self: Self, other: Any, /) -> bool:
+        if other is self:
+            return False
+        elif isinstance(other, BigSortedSet):
+            return (
+                len(self) != len(other)
+                or any(x != y for x, y in zip(self, other))
+            )
+        elif isinstance(other, AbstractSet):
+            return len(self) != len(other) or not other.issuperset(self)
+        else:
+            return NotImplemented
 
     def __repr__(self: Self, /) -> str:
         return f"{type(self).__name__}({self._path})"
