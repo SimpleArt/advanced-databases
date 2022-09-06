@@ -446,27 +446,53 @@ class BigSortedSet(MutableSet[T], Generic[T]):
 
     def update(self: Self, /, *iterables: Iterable[Any]) -> None:
         if self._len == 0:
-            filenames = self._filenames
             iterables = (*map(iter, iterables),)
             # Optimized for not `if not in self:` checks when initially empty.
             iterator = chain.from_iterable(iterables)
-            front = (key for key, _ in groupby(sorted(islice(iterator, CHUNKSIZE_EXTENDED ** 2))))
+            front = (
+                key
+                for key, _ in groupby(sorted(islice(
+                    iterator,
+                    CHUNKSIZE_EXTENDED ** 2,
+                )))
+            )
             while True:
                 chunk = [*islice(front, CHUNKSIZE_EXTENDED)]
                 if not chunk:
                     return
-                filenames.append(self._get_filename())
+                self._filenames.append(self._get_filename())
+                self._commit_chunk(filenames[-1], chunk)
+                self._len += len(chunk)
+                self._lens.append(len(chunk))
+                self._mins.append(chunk[0])
+        elif self._len < CHUNKSIZE_EXTENDED ** 2:
+            iterables = (*map(iter, iterables),)
+            # Optimized for not `if not in self:` checks when initially empty.
+            iterator = chain.from_iterable(iterables)
+            front = [*islice(iterator, CHUNKSIZE_EXTENDED ** 2)]
+            # Manually perform small insertions.
+            if len(front) <= self._len // 8:
+                # Sort to encourage cache efficiency.
+                front.sort()
+                for element, _ in groupby(front):
+                    self.add(element)
+                return
+            # Large insertions are merged with the database and then
+            # bulk sorted.
+            front.extend(self)
+            self.clear()
+            front.sort()
+            while True:
+                chunk = [*islice(front, CHUNKSIZE_EXTENDED)]
+                if not chunk:
+                    return
+                self._filenames.append(self._get_filename())
                 self._commit_chunk(filenames[-1], chunk)
                 self._len += len(chunk)
                 self._lens.append(len(chunk))
                 self._mins.append(chunk[0])
         # Chain iterables and collect only new items.
-        iterator = (
-            element
-            for iterable in iterables
-            for element in iterable
-            if element not in self
-        )
+        iterator = chain.from_iterable(iterables)
         while True:
             has_elements = False
             # Fast cache-efficient insertion by sorting in chunks and
