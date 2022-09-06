@@ -484,7 +484,7 @@ class BigList(ViewableMutableSequence[T], Generic[T]):
             self._cache.move_to_end(filename)
         else:
             self._free_cache()
-            with open(self._path / "list" / f"{filename}.txt", mode="rb") as file:
+            with open(self._to_filename(filename), mode="rb") as file:
                 self._cache[filename] = pickle.load(file)
         return self._cache[filename]
 
@@ -524,7 +524,7 @@ class BigList(ViewableMutableSequence[T], Generic[T]):
     def _new_chunk(self: Self, index: int, chunk: list[T], /) -> None:
         filenames = self._filenames
         L = len(filenames)
-        if self._len == 0:
+        if len(self) == 0:
             self._commit_chunk(0.0, chunk)
             filenames.append(0.0)
             return
@@ -609,13 +609,13 @@ class BigList(ViewableMutableSequence[T], Generic[T]):
         if filename in self._cache:
             segment = self._cache.pop(filename)
         else:
-            with open(self._path / "list" / f"{filename}.txt", mode="rb") as file:
+            with open(self._to_filename(filename), mode="rb") as file:
                 segment = pickle.load(file)
         self._del_chunk(index)
         return segment
 
     def _to_filename(self: Self, value: float, /) -> str:
-        return self._path / "list" / f"{value:.f}".replace(".", "-") + ".txt"
+        return self._path / "list" / (f"{value:f}".replace(".", "-") + ".txt")
 
     def append(self: Self, value: T, /) -> None:
         if len(self) == 0:
@@ -631,7 +631,7 @@ class BigList(ViewableMutableSequence[T], Generic[T]):
         path = self._path
         self._set_pending()
         for filename in self._filenames:
-            (path / "list" / f"{filename}.txt").unlink()
+            self._to_filename(filename).unlink()
         with open(path / "list" / "filenames.txt", mode="wb") as file:
             pickle.dump([], file)
         with open(path / "list" / "lens.txt", mode="wb") as file:
@@ -649,7 +649,7 @@ class BigList(ViewableMutableSequence[T], Generic[T]):
         with open(path / "list" / "filenames.txt", mode="wb") as file:
             pickle.dump(self._filenames, file)
         with open(path / "list" / "lens.txt", mode="wb") as file:
-            pickle.dump(self._index._data, file)
+            pickle.dump([*self._index], file)
         self._clear_pending()
 
     def extend(self: Self, iterable: Iterable[T], /) -> None:
