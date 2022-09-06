@@ -115,8 +115,20 @@ class BigSortedSet(MutableSet[T], Generic[T]):
     ) -> None:
         self.commit()
 
+    def __ge__(self: Self, other: Any, /) -> bool:
+        if isinstance(other, AbstractSet):
+            return self.issuperset(other)
+        else:
+            return NotImplemented
+
     def __getstate__(self: Self, /) -> Path:
         return self._path
+
+    def __gt__(self: Self, other: Any, /) -> bool:
+        if isinstance(other, AbstractSet):
+            return len(self) > len(other) and self.issuperset(other)
+        else:
+            return NotImplemented
 
     def __iand__(self: Self, other: Iterable[T], /) -> Self:
         if isinstance(other, Iterable):
@@ -152,8 +164,14 @@ class BigSortedSet(MutableSet[T], Generic[T]):
         else:
             return NotImplemented
 
+    def __le__(self: Self, other: Any, /) -> bool:
+        return NotImplemented
+
     def __len__(self: Self, /) -> int:
         return self._len
+
+    def __lt__(self: Self, other: Any, /) -> bool:
+        return NotImplemented
 
     def __ne__(self: Self, other: Any, /) -> bool:
         if other is self:
@@ -462,7 +480,15 @@ class BigSortedSet(MutableSet[T], Generic[T]):
             self._mins[:] = db._mins[:]
 
     def isdisjoint(self: Self, iterable: Iterable[Any], /) -> bool:
-        if length_hint(iterable) > len(self) and isinstance(iterable, AbstractSet):
+        if iterable is self:
+            return self._len == 0
+        elif isinstance(iterable, BigSortedSet):
+            return 1 not in (
+                i
+                for _, group in groupby(merge(self, iterable))
+                for i, _ in enumerate(group)
+            )
+        elif length_hint(iterable) > len(self) and isinstance(iterable, AbstractSet):
             return not any(element in iterable for element in self)
         else:
             iterator = iter(iterable)
@@ -476,6 +502,11 @@ class BigSortedSet(MutableSet[T], Generic[T]):
     def issubset(self: Self, iterable: Iterable[Any], /) -> bool:
         if isinstance(iterable, AbstractSet):
             return iterable >= self
+        try:
+            if len(self) > len(iterable):
+                return False
+        except:
+            pass
         path = self._path
         temp = path / "__temp__"
         with BigSortedSet(temp) as db:
@@ -485,6 +516,11 @@ class BigSortedSet(MutableSet[T], Generic[T]):
         return result
 
     def issuperset(self: Self, iterable: Iterable[Any], /) -> bool:
+        try:
+            if len(self) < len(iterable):
+                return False
+        except:
+            pass
         iterator = iter(iterable)
         while True:
             chunk = sorted(islice(iterable, CHUNKSIZE_EXTENDED))
