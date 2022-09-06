@@ -105,11 +105,39 @@ class BigSortedSet(MutableSet[T], Generic[T]):
     def __getstate__(self: Self, /) -> Path:
         return self._path
 
+    def __iand__(self: Self, other: Iterable[T], /) -> Self:
+        if isinstance(other, Iterable):
+            self.intersection_update(other)
+            return self
+        else:
+            return NotImplemented
+
+    def __ior__(self: Self, other: Iterable[T], /) -> Self:
+        if isinstance(other, Iterable):
+            self.update(other)
+            return self
+        else:
+            return NotImplemented
+
+    def __isub__(self: Self, other: Iterable[T], /) -> Self:
+        if isinstance(other, Iterable):
+            self.difference_update(other)
+            return self
+        else:
+            return NotImplemented
+
     def __iter__(self: Self, /) -> Iterator[T]:
         return chain.from_iterable(
             self._cache_chunk(i)
             for i, _ in enumerate(self._filenames)
         )
+
+    def __ixor__(self: Self, other: Iterable[T], /) -> Self:
+        if isinstance(other, Iterable):
+            self.symmetric_difference_update(other)
+            return self
+        else:
+            return NotImplemented
 
     def __len__(self: Self, /) -> int:
         return self._len
