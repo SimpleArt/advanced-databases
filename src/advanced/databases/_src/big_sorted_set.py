@@ -38,6 +38,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
     _lens: Final[list[int]]
     _mins: Final[list[T]]
     _path: Final[Path]
+    _pending: bool
 
     __slots__ = {
         "_cache":
@@ -52,19 +53,45 @@ class BigSortedSet(MutableSet[T], Generic[T]):
             "The first element of each segment.",
         "_path":
             "The folder containing all of the files.",
+        "_pending":
+            "Flag for if commits are pending.",
     }
 
     def __init__(self: Self, path: Union[PathLike, bytes, str], /) -> None:
         path = Path(path).resolve()
         path.mkdir(exist_ok=True)
         (path / "sorted_set").mkdir(exist_ok=True)
-        ensure_file(path / "sorted_set" / "counter.txt", 0)
         self._cache = OrderedDict()
-        self._filenames = ensure_file(path / "sorted_set" / "filenames.txt", [])
-        self._lens = ensure_file(path / "sorted_set" / "lens.txt", [])
-        self._len = sum(self._lens)
-        self._mins = ensure_file(path / "sorted_set" / "mins.txt", [])
         self._path = path
+        self._pending = False
+        if ensure_file(path / "sorted_set" / "pending.txt", False):
+            self._filenames = [
+                int(file_path.name[:-4])
+                for file_path in (path / "sorted_set").glob("*.txt")
+                if file_path.name not in ("counter.txt", "filenames.txt", "lens.txt", "mins.txt", "pending.txt")
+            ]
+            if self._filenames:
+                with open(path / "sorted_set" / "counter.txt", mode="wb") as file:
+                    pickle.dump(max(self._filenames) + 1, file)
+            else:
+                with open(path / "sorted_set" / "counter.txt", mode="wb") as file:
+                    pickle.dump(0, file)
+            file_indexes = {}
+            file_lens = {}
+            file_mins = {}
+            for i, f in enumerate(self._filenames):
+                file_indexes[f] = i
+                file_lens[f] = self._cache_chunk(i)[0]
+                file_mins[f] = len(self._cache_chunk(i))
+            self._filenames.sort(key=lambda f: file_mins[f])
+            self._index = NestedIndex(map(file_mins.get, self._filenames))
+            self.commit()
+        else:
+            ensure_file(path / "sorted_set" / "counter.txt", 0)
+            self._filenames = ensure_file(path / "sorted_set" / "filenames.txt", [])
+            self._lens = ensure_file(path / "sorted_set" / "lens.txt", [])
+            self._len = sum(self._lens)
+            self._mins = ensure_file(path / "sorted_set" / "mins.txt", [])
 
     def __contains__(self: Self, element: Any, /) -> bool:
         try:
@@ -83,6 +110,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
         j = bisect(self._cache_chunk(i - 1), element)
         if j == 0 or element != self._cache_chunk(i - 1)[j - 1]:
             raise KeyError(element)
+        self._set_pending()
         del self._cache_chunk(i - 1)[j - 1]
         self._len -= 1
         self._lens[i - 1] -= 1
@@ -208,6 +236,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
             pass
         elif lens[0] > 2 * CHUNKSIZE:
             chunk = self._cache_chunk(0)
+            self._set_pending()
             self._filenames.append(self._get_filename())
             self._cache[self._filenames[-1]] = chunk[len(chunk) // 2:]
             lens[0] = len(chunk) // 2
@@ -219,6 +248,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
         index = range(len(self._filenames))[index]
         if index == 0:
             if lens[0] + lens[1] < CHUNKSIZE:
+                self._set_pending()
                 lens[0] += lens[1]
                 self._len += lens[1]
                 self._cache_chunk(0).extend(self._pop_chunk(1))
@@ -227,6 +257,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                     *self._cache_chunk(0),
                     *self._cache_chunk(1),
                 ]
+                self._set_pending()
                 self._cache_chunk(0)[:] = chunk[: len(chunk) // 3]
                 lens[0] = len(self._cache_chunk(0))
                 self._cache_chunk(1)[:] = chunk[len(chunk) // 3 : 2 * len(chunk) // 3]
@@ -245,6 +276,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                 pass
             elif lens[0] > lens[1]:
                 diff = lens[0] - lens[1]
+                self._set_pending()
                 self._cache_chunk(1)[:0] = self._cache_chunk(0)[-diff // 2 :]
                 lens[1] = len(self._cache_chunk(1))
                 mins[1] = self._cache_chunk(1)[0]
@@ -252,6 +284,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                 lens[0] = len(self._cache_chunk(0))
             else:
                 diff = lens[1] - lens[0]
+                self._set_pending()
                 self._cache_chunk(0).extend(self._cache_chunk(1)[: diff // 2])
                 lens[0] = len(self._cache_chunk(0))
                 del self._cache_chunk(1)[: diff // 2]
@@ -259,6 +292,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                 mins[1] = self._cache_chunk(1)[0]
         elif index + 1 == len(self._filenames):
             if lens[-1] + lens[-2] < CHUNKSIZE:
+                self._set_pending()
                 lens[-2] += lens[-1]
                 self._cache_chunk(index - 1).extend(self._pop_chunk(index))
             elif lens[-1] + lens[-2] > 4 * CHUNKSIZE:
@@ -266,6 +300,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                     *self._cache_chunk(-2),
                     *self._cache_chunk(-1),
                 ]
+                self._set_pending()
                 self._cache_chunk(-2)[:] = chunk[: len(chunk) // 3]
                 lens[-2] = len(self._cache_chunk(-2))
                 self._cache_chunk(-1)[:] = chunk[len(chunk) // 3 : 2 * len(chunk) // 3]
@@ -284,6 +319,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                 pass
             elif lens[-1] < lens[-2]:
                 diff = lens[-2] - lens[-1]
+                self._set_pending()
                 self._cache_chunk(-1)[:0] = self._cache_chunk(-2)[-diff // 2 :]
                 lens[-1] = len(self._cache_chunk(-1))
                 mins[-1] = self._cache_chunk(-1)[0]
@@ -291,6 +327,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                 lens[-2] = len(self._cache_chunk(-2))
             else:
                 diff = lens[-1] - lens[-2]
+                self._set_pending()
                 self._cache_chunk(-2).extend(self._cache_chunk(-1)[: diff // 2])
                 lens[-2] = len(self._cache_chunk(-2))
                 del self._cache_chunk(-1)[: diff // 2]
@@ -303,6 +340,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                     *self._cache_chunk(index),
                     *self._pop_chunk(index + 1),
                 ]
+                self._set_pending()
                 self._cache_chunk(index - 1)[:] = chunk[: len(chunk) // 2]
                 self._cache_chunk(index)[:] = chunk[len(chunk) // 2 :]
                 lens[index - 1] = len(chunk) // 2
@@ -314,6 +352,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                     *self._cache_chunk(index),
                     *self._cache_chunk(index + 1),
                 ]
+                self._set_pending()
                 self._cache_chunk(index - 1)[:] = chunk[: len(chunk) // 4]
                 lens[index - 1] = len(self._cache_chunk(index - 1))
                 self._cache_chunk(index)[:] = chunk[len(chunk) // 4 : len(chunk) // 2]
@@ -334,6 +373,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                     *self._cache_chunk(index),
                     *self._cache_chunk(index + 1),
                 ]
+                self._set_pending()
                 self._cache_chunk(index - 1)[:] = chunk[: len(chunk) // 3]
                 lens[index - 1] = len(self._cache_chunk(index - 1))
                 self._cache_chunk(index)[:] = chunk[len(chunk) // 3 : 2 * len(chunk) // 3]
@@ -353,12 +393,20 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                 self._cache[filename] = pickle.load(file)
         return self._cache[filename]
 
+    def _clear_pending(self: Self, /) -> None:
+        if self._pending:
+            self._pending = False
+            with open(self._path / "sorted_set" / "pending.txt", mode="wb") as file:
+                pickle.dump(False, file)
+
     def _commit_chunk(self: Self, filename: int, segment: list[T], /) -> None:
+        self._set_pending()
         with open(self._path / "sorted_set" / f"{filename}.txt", mode="wb") as file:
             pickle.dump(segment, file)
 
     def _del_chunk(self: Self, index: int, /) -> None:
         index = range(len(self._filenames))[index]
+        self._set_pending()
         filename = self._filenames.pop(index)
         (self._path / "sorted_set" / f"{filename}.txt").unlink()
         self._len -= self._lens.pop(index)
@@ -377,6 +425,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
 
     def _get_filename(self: Self, /) -> int:
         path = self._path
+        self._set_pending()
         with open(path / "sorted_set" / "counter.txt", mode="rb") as file:
             uid = pickle.load(file)
         with open(path / "sorted_set" / "counter.txt", mode="wb") as file:
@@ -395,21 +444,30 @@ class BigSortedSet(MutableSet[T], Generic[T]):
         self._del_chunk(index)
         return segment
 
+    def _set_pending(self: Self, /) -> None:
+        if not self._pending:
+            self._pending = True
+            with open(self._path / "sorted_set" / "pending.txt", mode="wb") as file:
+                pickle.dump(True, file)
+
     def add(self: Self, element: T, /) -> None:
         i = bisect(self._mins, element)
         if i > 0:
             j = bisect(self._cache_chunk(i - 1), element)
             if j == 0 or self._cache_chunk(i - 1)[j - 1] != element:
+                self._set_pending()
                 self._cache_chunk(i - 1).insert(j, element)
                 self._len += 1
                 self._lens[i - 1] += 1
                 self._balance(i - 1)
         elif self._len > 0:
+            self._set_pending()
             self._cache_chunk(0).insert(0, element)
             self._len += 1
             self._lens[0] += 1
             self._balance(0)
         else:
+            self._set_pending()
             self._filenames.append(self._get_filename())
             self._cache[self._filenames[-1]] = [element]
             self._len = 1
@@ -418,6 +476,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
 
     def clear(self: Self, /) -> None:
         path = self._path
+        self._set_pending()
         for filename in self._filenames:
             (path / "sorted_set" / f"{filename}.txt").unlink()
         with open(path / "sorted_set" / "counter.txt", mode="wb") as file:
@@ -428,6 +487,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
             pickle.dump([], file)
         with open(path / "sorted_set" / "mins.txt", mode="wb") as file:
             pickle.dump([], file)
+        self._clear_pending()
         self._cache.clear()
         self._filenames.clear()
         self._len = 0
@@ -436,14 +496,16 @@ class BigSortedSet(MutableSet[T], Generic[T]):
 
     def commit(self: Self, /) -> None:
         path = self._path
+        self._set_pending()
+        for filename, segment in self._cache.items():
+            self._commit_chunk(filename, segment)
         with open(path / "sorted_set" / "filenames.txt", mode="wb") as file:
             pickle.dump(self._filenames, file)
         with open(path / "sorted_set" / "lens.txt", mode="wb") as file:
             pickle.dump(self._lens, file)
         with open(path / "sorted_set" / "mins.txt", mode="wb") as file:
             pickle.dump(self._mins, file)
-        for filename, segment in self._cache.items():
-            self._commit_chunk(filename, segment)
+        self._clear_pending()
 
     def difference_update(self: Self, /, *iterables: Iterable[Any]) -> None:
         for iterable in iterables:
@@ -455,6 +517,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
         if i > 0:
             j = bisect(self._cache_chunk(i - 1), element)
             if j > 0 and self._cache_chunk(i - 1)[j - 1] == element:
+                self._set_pending()
                 del self._cache_chunk(i - 1)[j]
                 self._len -= 1
                 self._lens[i - 1] -= 1
@@ -463,21 +526,31 @@ class BigSortedSet(MutableSet[T], Generic[T]):
     def intersection_update(self: Self, /, *iterables: Iterable[Any]) -> None:
         path = self._path
         temp = path / "__temp__"
-        for iterable in iterables:
-            with BigSortedSet(temp) as db:
+        if not iterables:
+            return
+        with BigSortedSet(temp) as db:
+            db.clear()
+            for iterable in iterables:
                 db.update(element for element in iterable if element in self)
-            for filename in ("counter.txt", "filenames.txt", "lens.txt", "mins.txt"):
-                (temp / "sorted_set" / filename).rename(
-                    path / "sorted_set" / filename
-                )
-            for filename in db._filenames:
-                (temp / "sorted_set" / f"{filename}.txt").rename(
-                    path / "sorted_set" / f"{filename}.txt"
-                )
-            self._filenames[:] = db._filenames[:]
-            self._len = db._len
-            self._lens[:] = db._lens[:]
-            self._mins[:] = db._mins[:]
+                if len(db) == len(self):
+                    with db:
+                        db.clear()
+                    continue
+                self._set_pending()
+                for filename in ("counter.txt", "filenames.txt", "lens.txt", "mins.txt"):
+                    (temp / "sorted_set" / filename).rename(
+                        path / "sorted_set" / filename
+                    )
+                for filename in db._filenames:
+                    (temp / "sorted_set" / f"{filename}.txt").rename(
+                        path / "sorted_set" / f"{filename}.txt"
+                    )
+                self._filenames[:] = db._filenames[:]
+                self._len = db._len
+                self._lens[:] = db._lens[:]
+                self._mins[:] = db._mins[:]
+                with db:
+                    db.clear()
 
     def isdisjoint(self: Self, iterable: Iterable[Any], /) -> bool:
         if iterable is self:
@@ -533,6 +606,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
         if self._len == 0:
             raise KeyError
         else:
+            self._set_pending()
             self._len -= 1
             self._lens[-1] -= 1
             element = self._cache_chunk(-1).pop()
@@ -548,8 +622,10 @@ class BigSortedSet(MutableSet[T], Generic[T]):
     def symmetric_difference_update(self: Self, /, *iterables: Iterable[Any]) -> None:
         path = self._path
         temp = path / "__temp__"
-        for iterable in iterables:
-            with BigSortedSet(temp) as db:
+        if not iterables:
+            return
+        with BigSortedSet(temp) as db:
+            for iterable in iterables:
                 db.update(iterable)
                 for _ in reversed(range(len(db._filenames))):
                     for element in db._pop_chunk(-1):
@@ -575,6 +651,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
                 chunk = [*islice(front, CHUNKSIZE_EXTENDED)]
                 if not chunk:
                     return
+                self._set_pending()
                 self._filenames.append(self._get_filename())
                 self._commit_chunk(filenames[-1], chunk)
                 self._len += len(chunk)
@@ -589,6 +666,7 @@ class BigSortedSet(MutableSet[T], Generic[T]):
             if len(front) <= self._len // 8:
                 # Sort to encourage cache efficiency.
                 front.sort()
+                self._set_pending()
                 for element, _ in groupby(front):
                     self.add(element)
                 return
@@ -609,14 +687,13 @@ class BigSortedSet(MutableSet[T], Generic[T]):
         # Chain iterables and collect only new items.
         iterator = chain.from_iterable(iterables)
         while True:
-            has_elements = False
             # Fast cache-efficient insertion by sorting in chunks and
             # inserting nearby elements together.
-            for key, _ in groupby(sorted(islice(
+            chunk = sorted(islice(
                 iterator,
                 CHUNKSIZE_EXTENDED ** 2,
-            ))):
-                has_elements = True
-                self.add(element)
-            if not has_elements:
+            ))
+            if not chunk:
                 return
+            for key, _ in groupby(chunk):
+                self.add(element)
