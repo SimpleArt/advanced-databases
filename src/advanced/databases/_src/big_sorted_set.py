@@ -290,6 +290,13 @@ class BigSortedSet(MutableSet[T], Generic[T]):
         while len(self._cache) >= 16:
             self._commit_chunk(*self._cache.popitem(last=False))
 
+    @classmethod
+    def _from_iterable(cls: Type[Self], iterable: Iterable[T]) -> Self:
+        raise NotImplementedError(
+            "cannot create big instances, create a destination to save"
+            " into instead."
+        )
+
     def _get_filename(self: Self, /) -> int:
         path = self._path
         with open(path / "sorted_set" / "counter.txt", mode="rb") as file:
