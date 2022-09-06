@@ -145,6 +145,12 @@ class BigSortedSet(MutableSet[T], Generic[T]):
     def __repr__(self: Self, /) -> str:
         return f"{type(self).__name__}({self._path})"
 
+    def __reversed__(self: Self, /) -> Iterator[T]:
+        return chain.from_iterable(
+            reversed(self._cache_chunk(~i))
+            for i, _ in enumerate(reversed(self._filenames))
+        )
+
     def __setstate__(self: Self, path: Path, /) -> None:
         type(self).__init__(self, path)
 
