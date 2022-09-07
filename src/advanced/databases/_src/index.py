@@ -789,12 +789,22 @@ class NestedIndex(MutableSequence[int]):
         fs = fi // si
         if j == 0:
             if i > 0 and fenwick[i - 1] // segments[i - 1] == fs + value:
-                fenwick.update(i - 1, fs + value)
-                fenwick.update(i, -fs)
-                segments.update(i - 1, 1)
-                segments.update(i, -1)
+                if si == 1:
+                    fenwick.update(i - 1, fs + value)
+                    del fenwick[i]
+                    segments.update(i - 1, 1)
+                    del segments[i]
+                else:
+                    fenwick.update(i - 1, fs + value)
+                    fenwick.update(i, -fs)
+                    segments.update(i - 1, 1)
+                    segments.update(i, -1)
+            elif si == 1:
+                fenwick.update(i, value)
             else:
+                fenwick.update(i, -fs)
                 fenwick.insert(i, fs + value)
+                segments.update(i, -1)
                 segments.insert(i, 1)
         elif j + 1 == si:
             if i + 1 < len(segments) and fenwick[i + 1] // segments[i + 1] == fs + value:
@@ -803,7 +813,9 @@ class NestedIndex(MutableSequence[int]):
                 segments.update(i, -1)
                 segments.update(i + 1, 1)
             else:
+                fenwick.update(i, -fs)
                 fenwick.insert(i + 1, fs + value)
+                segments.update(i, -1)
                 segments.insert(i + 1, 1)
         else:
             fenwick.insert(i + 1, fs + value)
