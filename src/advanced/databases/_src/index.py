@@ -787,29 +787,44 @@ class NestedIndex(MutableSequence[int]):
         fi = fenwick[i]
         si = segments[i]
         fs = fi // si
-        if j == 0:
-            if i > 0 and fenwick[i - 1] // segments[i - 1] == fs + value:
-                if si == 1:
-                    fenwick.update(i - 1, fs + value)
-                    del fenwick[i]
-                    segments.update(i - 1, 1)
-                    del segments[i]
-                else:
-                    fenwick.update(i - 1, fs + value)
-                    fenwick.update(i, -fs)
-                    segments.update(i - 1, 1)
-                    segments.update(i, -1)
-            elif si == 1:
-                fenwick.update(i, value)
+        left = None if i == 0 else fenwick[i - 1] // segments[i - 1]
+        right = None if i + 1 == len(fenwick) else fenwick[i + 1] // segments[i + 1]
+        if si == 1 and left != fs + value != right:
+            fenwick.update(i, value)
+            segments.update(i, 1)
+        elif si == 1:
+            if fs + value != left:
+                del fenwick[i]
+                fenwick.update(i, right)
+                del segments[i]
+                segments.update(i, 1)
+            elif fs + value != right:
+                del fenwick[i]
+                fenwick.update(i - 1, left)
+                del segments[i]
+                segments.update(i - 1, 1)
+            else:
+                del fenwick[i]
+                fenwick.update(i - 1, left)
+                del fenwick[i]
+                del segments[i]
+                segments.update(i - 1, segments[i] + 1)
+                del segments[i]
+        elif j == 0:
+            if fs + value == left:
+                fenwick.update(i - 1, left)
+                fenwick.update(i, -fs)
+                segments.update(i - 1, 1)
+                segments.update(i, -1)
             else:
                 fenwick.update(i, -fs)
                 fenwick.insert(i, fs + value)
                 segments.update(i, -1)
                 segments.insert(i, 1)
         elif j + 1 == si:
-            if i + 1 < len(segments) and fenwick[i + 1] // segments[i + 1] == fs + value:
+            if fs + value == right:
                 fenwick.update(i, -fs)
-                fenwick.update(i + 1, fs + value)
+                fenwick.update(i + 1, right)
                 segments.update(i, -1)
                 segments.update(i + 1, 1)
             else:
